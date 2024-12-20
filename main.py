@@ -1,89 +1,82 @@
 import google.generativeai as genai
 import PIL
-import json
+
 
 from decouple import config
 from utils import *
 
 genai.configure(api_key=config('API_KEY'))
+model = genai.GenerativeModel("models/gemini-2.0-flash-exp")
 
-def consult_grid_gemini(): 
+
+def consult_gemini():
     img = PIL.Image.open(image_entire_captcha)
-
-
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
 
     response = model.generate_content(
     [
     '''
         Analise a seguinte imagem que contém:
         1. Uma modal central com uma grade 3x3 (9 quadros)
-        2. Possivelmente uma imagem de referência (top) localizada:
-           - À direita do texto
+        2. Um título acima da grade 3x3
+        3. Possivelmente uma imagem de referência localizada:
+           - À direita do titulo
            - Acima da grade 3x3
 
-        Retorne um JSON estruturado da seguinte forma:
+        INTERPRETE o título para encontrar o alvo ÚNICO da imagem. 
+        Exemplo 1, se no título for socilitado que é para clicar em um OBJETO, você vai me retornar a descrição do objeto INANIMADO e ignorará os demais elementos.
+        Exemplo 2, se no título for socilitado que é para clicar em um ANIMAL, você vai me retornar a descrição do animal VIVO e ignorará os demais elementos
+        
+        Realize a descrição dessas imagens nesse formato desejado:
         {
-            "top": "descrição da imagem de referência" (se existir),
-            "grid": {
-                "1": "descrição do quadro 1",
-                "2": "descrição do quadro 2",
-                ...
-                "9": "descrição do quadro 9"
-            }
+            titulo: 'Descrição do título',
+            imagem_referencia: 'Alvo da imagem de referência (caso exista, senão nulo), com descrição prescisa',
+            quadro_1: 'Descrição do quadro 1'
         }
+        
 
         Observações:
         - Numere os quadros da esquerda para direita, de cima para baixo (1-9)
-        - Forneça descrições sem muitos detalhes
-        - Omita o campo "top" se não houver imagem de referência
+        - Faça uma descrição RELEVANTE das imagens
+        - Os objetos que aparecem na imagem de referencia, eles não tem relação entre si
+        - Na imagem de referencia (caso exista), me retorne apenas o alvo principal dela e não a descrição completa
     ''', 
+        # - O retorno esperado é uma lista com seus valores [n1, n2, ...]
+        # - Não retorne nenhuma mensagem ou explicação além da lista
+        # - Forneça descrições das imagens sem muitos detalhes
+        # - O retorno esperado é uma lista com seus valores [n1, n2, ...].
     img
     ])
 
     response.resolve()
-    json_convert = response.text.strip("(```)")
-    json_convert = json_convert.replace('json\n', '', 1).replace('```','')
-    print(json_convert)
-    json_convert = json.loads(json_convert)
-    
-    return json_convert
-
-def consult_gemini():
-    answer_grid=consult_grid_gemini()
-
-    img = PIL.Image.open(image_title_captcha)
-
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    frames_described_dict = convert_response(response.text)
+    # pprint.pprint(frames_described_dict)
 
     response = model.generate_content(
     [
     f'''
-        Nessa imagem que estou te enviando, possui um título em cima de um Grid 3x3 de quadros com imagens.
-        Se houver uma imagem ao lado do título, desconsidere.
-        Com esse título e o Objeto que estou enviando, me retorne, APENAS UMA LISTA, contendo os números dos quadros corretos, 
-        com as opções disponíveis, de 1 a 9, as quais estão corretas.
-        Se possuir no Objeto abaixo um campo top diferente de None, leve ele em consideração para responder a pergunta do titulo.
-        {answer_grid}
-    
-        EU NÃO DESEJO UMA FUNÇÃO, E SIM A RESPOSTA DA IMAGEM ANALISADA.
-        
-        O retorno esperado é uma lista com seus valores [n1, n2, ...], não tendo nenhuma outra mensagem ou palavra junto da lista.
-    ''', 
-    img
+        Analise o seguinte dicionário que contém:
+        1. Um título indicando o que deve ser feito
+        2. Uma possível imagem de referência.
+        3. Nove quadros com suas descrições
+
+        Preciso que você interprete o texto com a imagem de referência (caso exista), e me retorne o número dos quadros que estão
+        de acordo com eles.
+
+        {frames_described_dict}
+
+        Observações:
+        - O retorno esperado é uma lista com seus valores [n1, n2, ...]
+        - Não retorne nenhuma mensagem ou explicação além da lista
+    '''
     ])
 
     response.resolve()
+    frames_correct_list = convert_response(response.text)
+    # pprint.pprint(frames_correct_list)
+    return frames_correct_list
     
-    response_filtered = filter_by_list(response.text.strip("(```)"))
-    if not response_filtered:
-        raise Exception('Não encontrou de relação do TITLE com o GRID.')
-    
-    return response_filtered
-
 #Alter
-image_entire_captcha = 'screenshot_hcaptcha.png'
-image_title_captcha = 'screenshot_title_hcaptcha.png'
+image_entire_captcha = 'screenshot_hcaptcha_example.png'
 
 
 correct_answers = consult_gemini()
